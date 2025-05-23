@@ -311,21 +311,28 @@ def setup():
     # 🌍 Set webhook for all bots in the registry
     try:
         logger.info("ℹ️ Setting up webhooks...")
-        main_updater.bot.delete_webhook()
-        logger.info(f"✅ Deleted existing webhook for main bot @{bot_username}")
+        try:
+            main_updater.bot.delete_webhook()
+            logger.info(f"✅ Deleted existing webhook for main bot @{bot_username}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to delete existing webhook for main bot: {str(e)}. Continuing...")
 
         for token in bot_registry:
             bot_info = bot_registry[token]
             bot = bot_info["bot"]
             webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/webhook/{token}"
-            bot.set_webhook(url=webhook_url)
-            logger.info(f"✅ Set webhook for bot with token ending {token[-4:]}: {webhook_url}")
+            try:
+                bot.set_webhook(url=webhook_url)
+                logger.info(f"✅ Set webhook for bot with token ending {token[-4:]}: {webhook_url}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to set webhook for bot with token ending {token[-4:]}: {str(e)}. Bot may not receive updates.")
     except Exception as e:
-        error_msg = f"🚨 Failed to set webhooks: {str(e)}"
+        error_msg = f"🚨 Critical failure during webhook setup: {str(e)}. Bot may not respond to updates."
         logger.error(error_msg)
         from utils.logging_utils import log_error
         log_error(error_msg)
-        raise
+        # Continue despite webhook failure to allow Gunicorn to bind
+        logger.info("ℹ️ Continuing setup despite webhook setup failure.")
 
     logger.info(f"✅ Setup completed, Gunicorn should now bind to port {PORT}")
 
