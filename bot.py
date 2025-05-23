@@ -124,6 +124,7 @@ def start_cloned_bot(token, admin_ids):
 def webhook_handler(environ, start_response):
     """Handle incoming webhook requests and route them to the appropriate bot."""
     global bot_registry, main_updater, main_dispatcher
+    logger.info("ℹ️ Received webhook request")
 
     # Create a Request object from the WSGI environ
     request = Request(environ)
@@ -131,6 +132,7 @@ def webhook_handler(environ, start_response):
     # Extract the token from the URL path (e.g., /webhook/{token})
     path = request.path
     if not path.startswith("/webhook/"):
+        logger.warning("⚠️ Invalid webhook path received")
         response = Response("Invalid webhook path", status=400)
         return response(environ, start_response)
 
@@ -165,6 +167,7 @@ def webhook_handler(environ, start_response):
             main_dispatcher.bot_data.update(context_data)
 
             # Process the update using the main dispatcher
+            logger.info(f"ℹ️ Processing update for bot with token ending {token[-4:]}")
             main_dispatcher.process_update(update)
             logger.info(f"✅ Processed update for bot with token ending {token[-4:]}")
             response = Response("OK", status=200)
@@ -175,6 +178,7 @@ def webhook_handler(environ, start_response):
             response = Response("Error processing update", status=500)
             return response(environ, start_response)
 
+    logger.warning("⚠️ Method not allowed for webhook request")
     response = Response("Method not allowed", status=405)
     return response(environ, start_response)
 
@@ -345,9 +349,9 @@ def setup():
         logger.info("ℹ️ Continuing setup despite webhook setup failure.")
 
     logger.info(f"✅ Setup completed, Gunicorn should now bind to port {PORT}")
-    _setup_completed = True  # Mark setup as completed
 
 # Expose the WSGI application for Gunicorn
+logger.info("ℹ️ Exposing WSGI application for Gunicorn")
 application = webhook_handler
 
 if __name__ == "__main__":
@@ -359,4 +363,4 @@ if __name__ == "__main__":
         setup()
         run_simple("0.0.0.0", 8443, webhook_handler, use_reloader=False, use_debugger=False)
     else:
-        logger.info("ℹ️ Running on Render, Gunicorn should handle the server via Procfile. If this message repeats, check Render's Start Command settings.")
+        logger.info("ℹ️ Running on Render, Gunicorn should handle the server via Procfile. If this message repeats, check Render's Start Command settings or Procfile.")
