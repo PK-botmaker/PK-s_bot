@@ -14,7 +14,6 @@ from handlers.settings import handle_settings, handle_settings_input
 from handlers.broadcast import broadcast, handle_broadcast_input, cancel_broadcast
 from handlers.batch import batch, handle_batch_input, handle_batch_edit, cancel_batch
 from handlers.filestore import store_file, genlink, batchgen, handle_genlink_selection, handle_batchgen_selection, handle_filestore_link
-from werkzeug.serving import run_simple
 from werkzeug.wrappers import Request, Response
 import json
 
@@ -43,7 +42,7 @@ def start_cloned_bot(token, admin_ids):
         if not bot_info:
             raise ValueError("Bot not found in cloned_bots")
 
-        # Skip if the bot is marked as standalone (we'll handle standalone bots differently if needed)
+        # Skip if the bot is marked as standalone
         if bot_info.get("standalone", False):
             logger.info(f"ℹ️ Skipped registering cloned bot with token ending {token[-4:]} - marked as standalone! 🤖")
             return None
@@ -154,7 +153,7 @@ def webhook_handler(environ, start_response):
                 response = Response("Invalid update", status=400)
                 return response(environ, start_response)
 
-            # Update the bot instance in the dispatcher (to ensure the correct bot handles the update)
+            # Update the bot instance in the dispatcher
             main_dispatcher.bot = bot
             main_dispatcher.bot_data.clear()
             main_dispatcher.bot_data.update(context_data)
@@ -173,15 +172,14 @@ def webhook_handler(environ, start_response):
     response = Response("Method not allowed", status=405)
     return response(environ, start_response)
 
-def main():
-    """🚀 Initialize and run the bot with cloned bots and custom captions/buttons."""
+def setup():
+    """🚀 Initialize the bot with cloned bots and custom captions/buttons."""
     global main_updater, main_dispatcher, bot_registry
 
     # 🔑 Load static env vars
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
     ADMIN_IDS = os.getenv("ADMIN_IDS")
     RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-    PORT = int(os.getenv("PORT", 8443))
 
     if not TELEGRAM_TOKEN or not ADMIN_IDS:
         error_msg = "🚨 Missing TELEGRAM_TOKEN or ADMIN_IDS"
@@ -214,10 +212,8 @@ def main():
         main_updater = Updater(TELEGRAM_TOKEN, use_context=True)
         main_dispatcher = main_updater.dispatcher
         main_dispatcher.bot_data.update(context_data)
-        # Log the bot's username for debugging
         bot_username = main_updater.bot.get_me().username
         logger.info(f"✅ Main bot initialized! 🎉 Bot username: @{bot_username}")
-        # Set up the Bot instance for logging
         from utils.logging_utils import set_log_bot
         set_log_bot(Bot(TELEGRAM_TOKEN))
     except Exception as e:
@@ -234,7 +230,6 @@ def main():
     }
 
     # 📡 Add handlers for main bot (full admin features)
-    # Group 0 for main bot handlers
     main_dispatcher.add_handler(CommandHandler("start", start, filters=Filters.chat_type.private), group=0)
     main_dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_clone_input), group=0)
     main_dispatcher.add_handler(CommandHandler("search", search, filters=Filters.chat_type.private), group=0)
@@ -262,7 +257,6 @@ def main():
     main_dispatcher.add_handler(CallbackQueryHandler(batch, pattern="^(generate_batch|edit_batch)$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(handle_batch_edit, pattern="^edit_batch_"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(cancel_batch, pattern="^cancel_batch$"), group=0)
-    # New File Store handlers for main bot
     main_dispatcher.add_handler(MessageHandler(Filters.document | Filters.photo | Filters.video | Filters.audio, store_file), group=0)
     main_dispatcher.add_handler(CommandHandler("genlink", genlink, filters=Filters.chat_type.private), group=0)
     main_dispatcher.add_handler(CommandHandler("batchgen", batchgen, filters=Filters.chat_type.private), group=0)
@@ -278,7 +272,6 @@ def main():
         from utils.db_channel import get_cloned_bots
         cloned_bots = get_cloned_bots()
         logger.info(f"✅ Loaded {len(cloned_bots)} cloned bots! 🌟")
-        # Log details of each bot for debugging
         for bot in cloned_bots:
             logger.info(f"ℹ️ Cloned bot: token ending {bot['token'][-4:]} | Visibility: {bot['visibility']} | Usage: {bot['usage']} | Standalone: {bot.get('standalone', False)}")
     except Exception as e:
@@ -296,36 +289,26 @@ def main():
         else:
             logger.error(f"⚠️ Failed to register cloned bot with token ending {bot['token'][-4:]}")
 
-    # 🌍 Start the webhook server for all bots
+    # 🌍 Set webhook for all bots in the registry
     try:
-        # Delete any existing webhook for the main bot
         main_updater.bot.delete_webhook()
         logger.info(f"✅ Deleted existing webhook for main bot @{bot_username}")
 
-        # Set webhook for all bots in the registry
         for token in bot_registry:
             bot_info = bot_registry[token]
             bot = bot_info["bot"]
             webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/webhook/{token}"
             bot.set_webhook(url=webhook_url)
             logger.info(f"✅ Set webhook for bot with token ending {token[-4:]}: {webhook_url}")
-
-        # Start the webhook server using Werkzeug
-        logger.info(f"✅ Starting webhook server on port {PORT} for all bots! 🚀")
-        run_simple(
-            "0.0.0.0",
-            PORT,
-            webhook_handler,
-            use_reloader=False,
-            use_debugger=False
-        )
-
     except Exception as e:
-        error_msg = f"🚨 Failed to start webhook server: {str(e)}"
+        error_msg = f"🚨 Failed to set webhooks: {str(e)}"
         logger.error(error_msg)
         from utils.logging_utils import log_error
         log_error(error_msg)
         raise
 
+# Expose the WSGI application for Gunicorn
+application = webhook_handler
+
 if __name__ == "__main__":
-    main()
+    setup()
