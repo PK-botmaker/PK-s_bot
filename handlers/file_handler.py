@@ -1,49 +1,40 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import logging
+from telegram import Update
 from telegram.ext import CallbackContext
 from utils.db_channel import get_setting, set_setting
-from utils.logging_utils import log_error
-import logging
 
 logger = logging.getLogger(__name__)
 
 def handle_file(update: Update, context: CallbackContext):
-    """📤 Handle file uploads and store metadata."""
-    user_id = update.effective_user.id
-    message = update.message
-    file = message.document or message.photo[-1] if message.photo else message.video or message.audio
+    """Handle file uploads (documents, photos, videos, audio)."""
+    user_id = str(update.effective_user.id)
+    is_admin = user_id in context.bot_data.get("admin_ids", [])
+    
+    # Example usage of get_setting
+    db_channel_id = get_setting("db_channel_id")
+    if not db_channel_id:
+        update.message.reply_text("❌ Database channel not set! Please configure it in settings.")
+        logger.error(f"🚨 DB channel not set for file upload by user {user_id}")
+        return
 
+    # Placeholder for file handling logic
+    file_type = "unknown"
+    if update.message.document:
+        file_type = "document"
+    elif update.message.photo:
+        file_type = "photo"
+    elif update.message.video:
+        file_type = "video"
+    elif update.message.audio:
+        file_type = "audio"
+
+    update.message.reply_text(f"📤 Received a {file_type} file! Processing... (DB Channel: {db_channel_id})")
+    logger.info(f"✅ User {user_id} uploaded a {file_type} file (DB Channel: {db_channel_id})")
+
+    # Example usage of set_setting (e.g., increment a file counter)
     try:
-        file_id = file.file_id
-        file_name = getattr(file, "file_name", f"File_{file_id}")
-        files = get_setting("files", {})
-        files[file_name] = {"file_id": file_id, "uploader": user_id}
-        set_setting("files", files)
-
-        # Check if user is in batch edit mode
-        batch_id = context.user_data.get("awaiting_batch_edit")
-        if batch_id:
-            batches = get_setting("batches", [])
-            batch = next((b for b in batches if b["id"] == batch_id), None)
-            if batch:
-                batch["files"].append(file_id)
-                set_setting("batches", batches)
-                update.message.reply_text(f"✅ File added to batch '{batch['name']}'! 🎉")
-                logger.info(f"✅ User {user_id} added file {file_id} to batch {batch_id}! 🌟")
-                return
-
-        # Apply custom caption and buttons
-        custom_caption = get_setting("custom_caption", "")
-        custom_buttons = get_setting("custom_buttons", [])
-        reply_markup = None
-        if custom_buttons:
-            buttons = [[InlineKeyboardButton(btn["text"], url=btn["url"]) for btn in custom_buttons]]
-            reply_markup = InlineKeyboardMarkup(buttons)
-
-        update.message.reply_text(
-            f"✅ File uploaded: {file_name}\n{custom_caption}" if custom_caption else f"✅ File uploaded: {file_name}",
-            reply_markup=reply_markup
-        )
-        logger.info(f"✅ User {user_id} uploaded file {file_id}! 🌟")
+        file_count = int(get_setting("file_count") or "0")
+        set_setting("file_count", str(file_count + 1))
+        logger.info(f"✅ Updated file count to {file_count + 1}")
     except Exception as e:
-        update.message.reply_text("⚠️ Failed to upload file! Try again! 😅")
-        log_error(f"🚨 File upload error for user {user_id}: {str(e)}")
+        logger.error(f"🚨 Failed to update file count: {str(e)}")
