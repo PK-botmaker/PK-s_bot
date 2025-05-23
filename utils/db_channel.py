@@ -45,23 +45,9 @@ def get_setting(key: str) -> str:
         logger.warning(f"⚠️ DB_CHANNEL_ID not set for fetching setting {key}. Please set it via the admin settings menu.")
         return SETTINGS.get(key, None)
 
-    try:
-        chat_messages = log_bot.get_chat_history(chat_id=db_channel_id, limit=100)
-        for message in chat_messages:
-            if message.text and message.text.startswith(f"SETTING:{key}:"):
-                try:
-                    value = message.text.split(f"SETTING:{key}:")[1]
-                    SETTINGS[key] = value
-                    logger.info(f"✅ Retrieved setting {key} = {value} from DB channel")
-                    return value
-                except Exception as e:
-                    logger.error(f"🚨 Error parsing setting {key}: {str(e)}")
-                    continue
-        logger.info(f"ℹ️ Setting {key} not found in DB channel, using default: {SETTINGS.get(key)}")
-        return SETTINGS.get(key, None)
-    except Exception as e:
-        logger.error(f"🚨 Failed to retrieve setting {key}: {str(e)}")
-        return SETTINGS.get(key, None)
+    # TODO: Implement a proper way to fetch settings from the database channel
+    logger.warning(f"⚠️ Fetching settings from DB channel not implemented in this version. Returning default for {key}.")
+    return SETTINGS.get(key, None)
 
 def set_setting(key: str, value: str):
     """Save a setting to the database channel and update the cached value."""
@@ -99,32 +85,9 @@ def get_cloned_bots():
         logger.warning("⚠️ DB_CHANNEL_ID not set. Cloned bots cannot be loaded until set via the admin settings menu.")
         return []
 
-    try:
-        messages = []
-        chat_messages = log_bot.get_chat_history(chat_id=db_channel_id, limit=100)
-        for message in chat_messages:
-            if message.text and message.text.startswith("CLONED_BOT:"):
-                try:
-                    data = message.text.split("CLONED_BOT:")[1].split("|")
-                    if len(data) != 6:
-                        continue
-                    bot_data = {
-                        "owner_id": data[0],
-                        "username": data[1],
-                        "token": data[2],
-                        "visibility": data[3],
-                        "usage": data[4],
-                        "created_at": data[5]
-                    }
-                    messages.append(bot_data)
-                except Exception as e:
-                    logger.error(f"🚨 Error parsing cloned bot message: {str(e)}")
-                    continue
-        logger.info(f"✅ Retrieved {len(messages)} cloned bots from DB channel")
-        return messages
-    except Exception as e:
-        logger.error(f"🚨 Failed to retrieve cloned bots: {str(e)}")
-        return []
+    # TODO: Implement a proper way to fetch cloned bots (e.g., via updates or a file)
+    logger.warning("⚠️ Fetching cloned bots not implemented in this version. Please upgrade python-telegram-bot or use an alternative storage method.")
+    return []
 
 def save_cloned_bot(owner_id: str, username: str, token: str, visibility: str, usage: str):
     """Save a cloned bot's details to the database channel and update the log channel."""
