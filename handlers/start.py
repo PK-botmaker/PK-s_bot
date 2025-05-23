@@ -110,6 +110,31 @@ def settings_menu(update: Update, context: CallbackContext):
     )
     logger.info(f"✅ Sent settings menu to admin {user_id}")
 
+def shortener_menu(update: Update, context: CallbackContext):
+    """Show URL shortener settings menu for admins."""
+    user_id = str(update.effective_user.id)
+    if user_id not in context.bot_data.get("admin_ids", []):
+        update.callback_query.answer("🚫 Admins only!")
+        logger.info(f"🚫 Unauthorized shortener menu access attempt by user {user_id}")
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🔗 Set Shortener API", callback_data="set_shortener_api"),
+            InlineKeyboardButton("🔑 Set API Key", callback_data="set_shortener_key")
+        ],
+        [
+            InlineKeyboardButton("❌ Disable Shortener", callback_data="disable_shortener")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    update.callback_query.message.reply_text(
+        "🔗 URL Shortener Settings:\nChoose an option to configure the shortener! 🚀",
+        reply_markup=reply_markup
+    )
+    logger.info(f"✅ Sent shortener menu to admin {user_id}")
+
 def batch_menu(update: Update, context: CallbackContext):
     """Show batch menu for admins."""
     user_id = str(update.effective_user.id)
