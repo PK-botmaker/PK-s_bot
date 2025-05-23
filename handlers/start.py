@@ -47,4 +47,87 @@ def start(update: Update, context: CallbackContext):
         )
         logger.info(f"✅ User menu sent to user {user_id} in chat {chat_id}")
 
-# ... (rest of the file remains the same)
+def settings_menu(update: Update, context: CallbackContext):
+    """Display the settings menu for the admin."""
+    query = update.callback_query
+    query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("📢 Add Channel", callback_data="add_channel"),
+         InlineKeyboardButton("🚫 Remove Channel", callback_data="remove_channel")],
+        [InlineKeyboardButton("🔗 Set Group Link", callback_data="set_group_link"),
+         InlineKeyboardButton("📜 Set DB Channel", callback_data="set_db_channel")],
+        [InlineKeyboardButton("📋 Set Log Channel", callback_data="set_log_channel"),
+         InlineKeyboardButton("🔒 Set Force Sub", callback_data="set_force_sub")],
+        [InlineKeyboardButton("🖼️ Set Banner", callback_data="banner"),
+         InlineKeyboardButton("🕒 Auto Delete", callback_data="auto_delete")],
+        [InlineKeyboardButton("👋 Welcome Message", callback_data="welcome_message"),
+         InlineKeyboardButton("🔗 Shortener", callback_data="shortener")],
+        [InlineKeyboardButton("🚫 Anti-Ban", callback_data="anti_ban"),
+         InlineKeyboardButton("🔄 Enable Redis", callback_data="enable_redis")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="start")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    query.edit_message_text(
+        text="⚙️ **Settings Menu** ⚙️\n\nChoose an option to configure your bot:",
+        reply_markup=reply_markup
+    )
+    logger.info("✅ Settings menu displayed for admin")
+
+def batch_menu(update: Update, context: CallbackContext):
+    """Display the batch menu for the admin."""
+    query = update.callback_query
+    query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("📦 Generate Batch", callback_data="generate_batch"),
+         InlineKeyboardButton("✏️ Edit Batch", callback_data="edit_batch")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="start")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    query.edit_message_text(
+        text="📦 **Batch Menu** 📦\n\nChoose an option to manage batches:",
+        reply_markup=reply_markup
+    )
+    logger.info("✅ Batch menu displayed for admin")
+
+def bot_stats(update: Update, context: CallbackContext):
+    """Display bot statistics for the admin."""
+    query = update.callback_query
+    query.answer()
+
+    # Placeholder for bot stats (you can expand this with actual stats)
+    stats_msg = (
+        "📊 **Bot Statistics** 📊\n\n"
+        "👥 Total Users: Not implemented\n"
+        "📂 Files Stored: Not implemented\n"
+        "🤖 Cloned Bots: Not implemented\n\n"
+        "More stats coming soon! 🚀"
+    )
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Back", callback_data="start")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    query.edit_message_text(
+        text=stats_msg,
+        reply_markup=reply_markup
+    )
+    logger.info("✅ Bot stats displayed for admin")
+
+def shortener_menu(update: Update, context: CallbackContext):
+    """Display the URL shortener settings menu for the admin."""
+    query = update.callback_query
+    query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("🔗 Set Shortener", callback_data="set_shortener_api"),
+         InlineKeyboardButton("🔑 Set Shortener Key", callback_data="set_shortener_key")],
+        [InlineKeyboardButton("🚫 Disable Shortener", callback_data="disable_shortener")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="start")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    query.edit_message_text(
+        text="🔗 **URL Shortener Settings** 🔗\n\nChoose an option to manage the URL shortener:",
+        reply_markup=reply_markup
+    )
+    logger.info("✅ Shortener menu displayed for admin")
