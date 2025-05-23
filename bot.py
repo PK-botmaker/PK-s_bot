@@ -16,8 +16,6 @@ from handlers.batch import batch, handle_batch_input, handle_batch_edit, cancel_
 from handlers.filestore import store_file, genlink, batchgen, handle_genlink_selection, handle_batchgen_selection, handle_filestore_link
 from werkzeug.wrappers import Request, Response
 import json
-import subprocess
-import sys
 
 # 🌟 Logging setup for Render
 logging.basicConfig(
@@ -361,21 +359,4 @@ if __name__ == "__main__":
         setup()
         run_simple("0.0.0.0", 8443, webhook_handler, use_reloader=False, use_debugger=False)
     else:
-        logger.info("ℹ️ Running on Render, expected to use Gunicorn via Procfile.")
-        # Fallback: Start Gunicorn programmatically if Render isn't using the Procfile
-        port = os.getenv("PORT", "10000")
-        logger.warning(f"⚠️ Render is running 'python bot.py' directly. Starting Gunicorn programmatically on port {port}...")
-        setup()  # Run setup before starting Gunicorn
-        try:
-            subprocess.run([
-                "gunicorn",
-                "-w", "4",
-                "-b", f"0.0.0.0:{port}",
-                "bot:application"
-            ], check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"🚨 Failed to start Gunicorn programmatically: {str(e)}")
-            sys.exit(1)
-        except Exception as e:
-            logger.error(f"🚨 Unexpected error while starting Gunicorn: {str(e)}")
-            sys.exit(1)
+        logger.info("ℹ️ Running on Render, Gunicorn should handle the server via Procfile. If this message repeats, check Render's Start Command settings.")
