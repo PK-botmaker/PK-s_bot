@@ -4,6 +4,8 @@ def setup():
     """🚀 Initialize the bot with cloned bots and custom captions/buttons."""
     global main_updater, main_dispatcher, bot_registry
 
+    logger.info("ℹ️ Starting setup process...")
+
     # 🔑 Load static env vars
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
     ADMIN_IDS = os.getenv("ADMIN_IDS")
@@ -30,6 +32,8 @@ def setup():
         log_error(error_msg)
         raise ValueError(error_msg)
 
+    logger.info("ℹ️ Environment variables validated successfully.")
+
     try:
         admin_ids = [str(id.strip()) for id in ADMIN_IDS.split(",")]
         logger.info(f"✅ Loaded admin IDs: {admin_ids}")
@@ -44,6 +48,7 @@ def setup():
 
     # 🤖 Initialize main bot
     try:
+        logger.info("ℹ️ Initializing main bot...")
         main_updater = Updater(TELEGRAM_TOKEN, use_context=True)
         main_dispatcher = main_updater.dispatcher
         main_dispatcher.bot_data.update(context_data)
@@ -64,11 +69,15 @@ def setup():
         "context_data": context_data
     }
 
+    logger.info("ℹ️ Main bot registered in bot_registry.")
+
     # 📡 Add handlers for main bot (full admin features)
     # ... (handlers remain the same)
+    logger.info("ℹ️ Handlers added for main bot.")
 
     # 🗄️ Load cloned bots from DB channel
     try:
+        logger.info("ℹ️ Loading cloned bots...")
         from utils.db_channel import get_cloned_bots
         cloned_bots = get_cloned_bots()
         logger.info(f"✅ Loaded {len(cloned_bots)} cloned bots! 🌟")
@@ -83,6 +92,7 @@ def setup():
         logger.info("ℹ️ Continuing bot setup despite failure to load cloned bots.")
 
     # Register cloned bots initially
+    logger.info("ℹ️ Registering cloned bots...")
     for bot in cloned_bots:
         success = start_cloned_bot(bot["token"], admin_ids)
         if success:
@@ -92,6 +102,7 @@ def setup():
 
     # 🌍 Set webhook for all bots in the registry
     try:
+        logger.info("ℹ️ Setting up webhooks...")
         main_updater.bot.delete_webhook()
         logger.info(f"✅ Deleted existing webhook for main bot @{bot_username}")
 
