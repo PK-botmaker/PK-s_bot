@@ -3,3 +3,4 @@ python-telegram-bot==13.7
 requests
 pillow
 gunicorn==20.1.0
+werkzeug==2.0.3
