@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from datetime import datetime
 from telegram import Bot
 
@@ -21,6 +22,9 @@ SETTINGS = {
     "db_channel_id": DEFAULT_DB_CHANNEL_ID,
     "log_id": DEFAULT_LOG_ID
 }
+
+# Path to store cloned bots
+CLONED_BOTS_FILE = "cloned_bots.json"
 
 def set_db_bot(bot: Bot):
     """Set the bot instance for database operations."""
@@ -45,7 +49,7 @@ def get_setting(key: str) -> str:
         logger.warning(f"⚠️ DB_CHANNEL_ID not set for fetching setting {key}. Please set it via the admin settings menu.")
         return SETTINGS.get(key, None)
 
-    # TODO: Implement a proper way to fetch settings from the database channel
+    # For now, we won't fetch settings from the channel since get_chat_history isn't available
     logger.warning(f"⚠️ Fetching settings from DB channel not implemented in this version. Returning default for {key}.")
     return SETTINGS.get(key, None)
 
@@ -75,7 +79,7 @@ def set_setting(key: str, value: str):
         raise
 
 def get_cloned_bots():
-    """Retrieve the list of cloned bots from the database channel."""
+    """Retrieve the list of cloned bots from a JSON file."""
     global log_bot
     db_channel_id = get_setting("db_channel_id")
     if not log_bot:
@@ -85,12 +89,20 @@ def get_cloned_bots():
         logger.warning("⚠️ DB_CHANNEL_ID not set. Cloned bots cannot be loaded until set via the admin settings menu.")
         return []
 
-    # TODO: Implement a proper way to fetch cloned bots (e.g., via updates or a file)
-    logger.warning("⚠️ Fetching cloned bots not implemented in this version. Please upgrade python-telegram-bot or use an alternative storage method.")
-    return []
+    try:
+        with open(CLONED_BOTS_FILE, "r") as f:
+            messages = json.load(f)
+        logger.info(f"✅ Retrieved {len(messages)} cloned bots from {CLONED_BOTS_FILE}")
+        return messages
+    except FileNotFoundError:
+        logger.info(f"ℹ️ {CLONED_BOTS_FILE} not found. Returning empty list.")
+        return []
+    except Exception as e:
+        logger.error(f"🚨 Failed to retrieve cloned bots from {CLONED_BOTS_FILE}: {str(e)}")
+        return []
 
 def save_cloned_bot(owner_id: str, username: str, token: str, visibility: str, usage: str):
-    """Save a cloned bot's details to the database channel and update the log channel."""
+    """Save a cloned bot's details to a JSON file and update the log channel."""
     global log_bot
     db_channel_id = get_setting("db_channel_id")
     log_id = get_setting("log_id")
@@ -111,12 +123,25 @@ def save_cloned_bot(owner_id: str, username: str, token: str, visibility: str, u
         raise ValueError(error_msg)
 
     try:
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        bot_data = f"CLONED_BOT:{owner_id}|{username}|{token}|{visibility}|{usage}|{created_at}"
-        log_bot.send_message(chat_id=db_channel_id, text=bot_data)
-        logger.info(f"✅ Saved cloned bot @{username} to DB channel for owner {owner_id}")
-
+        # Load existing cloned bots
         cloned_bots = get_cloned_bots()
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        bot_data = {
+            "owner_id": owner_id,
+            "username": username,
+            "token": token,
+            "visibility": visibility,
+            "usage": usage,
+            "created_at": created_at
+        }
+        cloned_bots.append(bot_data)
+
+        # Save updated list to JSON file
+        with open(CLONED_BOTS_FILE, "w") as f:
+            json.dump(cloned_bots, f, indent=4)
+        logger.info(f"✅ Saved cloned bot @{username} to {CLONED_BOTS_FILE} for owner {owner_id}")
+
+        # Update log channel with the table
         bots_by_owner = {}
         for bot in cloned_bots:
             owner = bot["owner_id"]
