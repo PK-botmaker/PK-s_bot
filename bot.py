@@ -31,6 +31,9 @@ bot_registry = {}
 main_updater = None
 main_dispatcher = None
 
+# Flag to ensure setup() is called only once
+_setup_completed = False
+
 def start_cloned_bot(token, admin_ids):
     """🤖 Register a cloned bot's handlers on the main dispatcher with visibility restrictions."""
     global main_dispatcher
@@ -103,8 +106,11 @@ def start_cloned_bot(token, admin_ids):
         if not RENDER_EXTERNAL_HOSTNAME:
             raise ValueError("RENDER_EXTERNAL_HOSTNAME not set")
         webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/webhook/{token}"
-        bot.set_webhook(url=webhook_url)
-        logger.info(f"✅ Set webhook for bot @{bot_username}: {webhook_url}")
+        try:
+            bot.set_webhook(url=webhook_url)
+            logger.info(f"✅ Set webhook for bot @{bot_username}: {webhook_url}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to set webhook for cloned bot @{bot_username}: {str(e)}")
 
         logger.info(f"✅ Successfully registered cloned bot @{bot_username} with token ending {token[-4:]} and visibility {visibility} and usage {usage}! 🤖")
         return True  # Indicate success
@@ -174,7 +180,12 @@ def webhook_handler(environ, start_response):
 
 def setup():
     """🚀 Initialize the bot with cloned bots and custom captions/buttons."""
-    global main_updater, main_dispatcher, bot_registry
+    global main_updater, main_dispatcher, bot_registry, _setup_completed
+
+    # Prevent multiple setup calls
+    if _setup_completed:
+        logger.info("ℹ️ Setup already completed, skipping redundant call.")
+        return
 
     logger.info("ℹ️ Starting setup process...")
 
@@ -331,10 +342,10 @@ def setup():
         logger.error(error_msg)
         from utils.logging_utils import log_error
         log_error(error_msg)
-        # Continue despite webhook failure to allow Gunicorn to bind
         logger.info("ℹ️ Continuing setup despite webhook setup failure.")
 
     logger.info(f"✅ Setup completed, Gunicorn should now bind to port {PORT}")
+    _setup_completed = True  # Mark setup as completed
 
 # Expose the WSGI application for Gunicorn
 application = webhook_handler
