@@ -6,8 +6,12 @@ from telegram import Bot
 logger = logging.getLogger(__name__)
 
 # Default values from environment variables
-DEFAULT_DB_CHANNEL_ID = os.getenv("DB_CHANNEL_ID", None)  # e.g., "-1001234567890"
-DEFAULT_LOG_ID = os.getenv("LOG_ID", None)  # e.g., "-1000987654321"
+DEFAULT_DB_CHANNEL_ID = os.getenv("DB_CHANNEL_ID", None)
+DEFAULT_LOG_ID = os.getenv("LOG_ID", None)
+
+# Log the loaded environment variables for debugging
+logger.info(f"ℹ️ Loaded DB_CHANNEL_ID from env: {DEFAULT_DB_CHANNEL_ID}")
+logger.info(f"ℹ️ Loaded LOG_ID from env: {DEFAULT_LOG_ID}")
 
 # Placeholder for the bot instance (set via utils.logging_utils)
 log_bot = None
@@ -38,15 +42,13 @@ def get_setting(key: str) -> str:
     # Use db_channel_id to fetch settings (avoid circular dependency for db_channel_id itself)
     db_channel_id = SETTINGS["db_channel_id"] if key != "db_channel_id" else DEFAULT_DB_CHANNEL_ID
     if not db_channel_id:
-        logger.error(f"🚨 DB_CHANNEL_ID not set for fetching setting {key}")
+        logger.warning(f"⚠️ DB_CHANNEL_ID not set for fetching setting {key}. Please set it via the admin settings menu.")
         return SETTINGS.get(key, None)
 
     try:
-        # Fetch messages from the database channel
         chat_messages = log_bot.get_chat_history(chat_id=db_channel_id, limit=100)
         for message in chat_messages:
             if message.text and message.text.startswith(f"SETTING:{key}:"):
-                # Parse the message text (format: "SETTING:key:value")
                 try:
                     value = message.text.split(f"SETTING:{key}:")[1]
                     SETTINGS[key] = value
@@ -68,19 +70,18 @@ def set_setting(key: str, value: str):
         logger.error("🚨 Log bot not set in utils/db_channel")
         raise ValueError("Log bot not set")
 
-    # Use the current db_channel_id (fall back to default if not set)
     db_channel_id = SETTINGS["db_channel_id"] if key != "db_channel_id" else DEFAULT_DB_CHANNEL_ID
     if not db_channel_id:
-        logger.error("🚨 DB_CHANNEL_ID not set for saving setting")
-        raise ValueError("DB_CHANNEL_ID not set")
+        error_msg = f"🚨 DB_CHANNEL_ID must be set to save settings. Please set it via the admin settings menu."
+        logger.error(error_msg)
+        from utils.logging_utils import log_error
+        log_error(error_msg)
+        raise ValueError(error_msg)
 
     try:
-        # Format the setting as a message
         setting_data = f"SETTING:{key}:{value}"
         log_bot.send_message(chat_id=db_channel_id, text=setting_data)
         logger.info(f"✅ Saved setting {key} = {value} to DB channel")
-
-        # Update the cached value
         SETTINGS[key] = value
         logger.info(f"✅ Updated cached setting {key} = {value}")
     except Exception as e:
@@ -95,7 +96,7 @@ def get_cloned_bots():
         logger.error("🚨 Log bot not set in utils/db_channel")
         return []
     if not db_channel_id:
-        logger.error("🚨 DB_CHANNEL_ID not set")
+        logger.warning("⚠️ DB_CHANNEL_ID not set. Cloned bots cannot be loaded until set via the admin settings menu.")
         return []
 
     try:
@@ -134,11 +135,17 @@ def save_cloned_bot(owner_id: str, username: str, token: str, visibility: str, u
         logger.error("🚨 Log bot not set in utils/db_channel")
         raise ValueError("Log bot not set")
     if not db_channel_id:
-        logger.error("🚨 DB_CHANNEL_ID not set")
-        raise ValueError("DB_CHANNEL_ID not set")
+        error_msg = "🚨 DB_CHANNEL_ID must be set to save cloned bots. Please set it via the admin settings menu."
+        logger.error(error_msg)
+        from utils.logging_utils import log_error
+        log_error(error_msg)
+        raise ValueError(error_msg)
     if not log_id:
-        logger.error("🚨 LOG_ID not set")
-        raise ValueError("LOG_ID not set")
+        error_msg = "🚨 LOG_ID must be set to save cloned bots. Please set it via the admin settings menu."
+        logger.error(error_msg)
+        from utils.logging_utils import log_error
+        log_error(error_msg)
+        raise ValueError(error_msg)
 
     try:
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
