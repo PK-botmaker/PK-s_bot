@@ -359,5 +359,4 @@ if __name__ == "__main__":
         setup()
         run_simple("0.0.0.0", 8443, webhook_handler, use_reloader=False, use_debugger=False)
     else:
-        # On Render, Gunicorn will handle the server
-        setup()
+        logger.info("ℹ️ Running on Render, Gunicorn should handle the server. Skipping direct execution.")
