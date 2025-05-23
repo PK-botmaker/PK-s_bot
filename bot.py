@@ -2,7 +2,7 @@ import os
 import logging
 from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackQueryHandler, Filters, Dispatcher
 from telegram import Bot, Update as TelegramUpdate
-from handlers.start import start, settings_menu, batch_menu, bot_stats
+from handlers.start import start, settings_menu, batch_menu, bot_stats, shortener_menu
 from handlers.file_handler import handle_file
 from handlers.clone_bot import create_clone_bot, view_clone_bots, handle_clone_input, handle_visibility_selection, handle_usage_selection
 from handlers.custom_caption import set_custom_caption, set_custom_buttons, handle_caption_input, handle_buttons_input
@@ -54,8 +54,9 @@ def start_cloned_bot(token, admin_ids):
 
         # Create a Bot instance for this cloned bot
         bot = Bot(token)
-        bot_username = bot.get_me().username
-        logger.info(f"ℹ️ Registering cloned bot @{bot_username} with token ending {token[-4:]}")
+        bot_info = bot.get_me()
+        bot_username = bot_info.username
+        logger.info(f"ℹ️ Registering cloned bot @{bot_username} with token ending {token[-4:]} (visibility: {visibility}, usage: {usage})")
 
         # Store the bot in the registry
         bot_registry[token] = {
@@ -76,6 +77,7 @@ def start_cloned_bot(token, admin_ids):
 
         # Create a group for this bot's handlers to avoid conflicts
         group = len(bot_registry)  # Unique group number for each bot
+        logger.info(f"ℹ️ Assigning handler group {group} for bot @{bot_username}")
 
         # Handlers based on usage type
         main_dispatcher.add_handler(CommandHandler("start", restrict_access(start), filters=Filters.chat_type.private), group=group)
@@ -83,6 +85,7 @@ def start_cloned_bot(token, admin_ids):
             main_dispatcher.add_handler(CommandHandler("search", restrict_access(search), filters=Filters.chat_type.private), group=group)
             main_dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, restrict_access(handle_request)), group=group)
             main_dispatcher.add_handler(CommandHandler("start", handle_request, pass_args=True, filters=Filters.chat_type.private), group=group)
+            logger.info(f"✅ Added searchbot handlers for bot @{bot_username}")
         elif usage == "filestore":
             main_dispatcher.add_handler(MessageHandler(Filters.document | Filters.photo | Filters.video | Filters.audio, restrict_access(store_file)), group=group)
             main_dispatcher.add_handler(CommandHandler("genlink", restrict_access(genlink), filters=Filters.chat_type.private), group=group)
@@ -90,11 +93,21 @@ def start_cloned_bot(token, admin_ids):
             main_dispatcher.add_handler(CallbackQueryHandler(handle_genlink_selection, pattern="^(genlink_|cancel_genlink)"), group=group)
             main_dispatcher.add_handler(CallbackQueryHandler(handle_batchgen_selection, pattern="^(batch_select_|batch_done|cancel_batchgen)"), group=group)
             main_dispatcher.add_handler(CommandHandler("start", handle_filestore_link, pass_args=True, filters=Filters.chat_type.private), group=group)
+            logger.info(f"✅ Added filestore handlers for bot @{bot_username}")
 
         # Add error handler for this bot
         main_dispatcher.add_error_handler(error_handler)
+        logger.info(f"✅ Added error handler for bot @{bot_username}")
 
-        logger.info(f"✅ Registered cloned bot @{bot_username} with token ending {token[-4:]} and visibility {visibility} and usage {usage}! 🤖")
+        # Set webhook for the cloned bot
+        RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+        if not RENDER_EXTERNAL_HOSTNAME:
+            raise ValueError("RENDER_EXTERNAL_HOSTNAME not set")
+        webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/webhook/{token}"
+        bot.set_webhook(url=webhook_url)
+        logger.info(f"✅ Set webhook for bot @{bot_username}: {webhook_url}")
+
+        logger.info(f"✅ Successfully registered cloned bot @{bot_username} with token ending {token[-4:]} and visibility {visibility} and usage {usage}! 🤖")
         return True  # Indicate success
     except Exception as e:
         error_msg = f"🚨 Failed to register cloned bot with token ending {token[-4:]}: {str(e)}"
@@ -240,9 +253,10 @@ def main():
     main_dispatcher.add_handler(CallbackQueryHandler(set_custom_buttons, pattern="^set_custom_buttons$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(tutorial, pattern="^tutorial$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(settings_menu, pattern="^settings$"), group=0)
+    main_dispatcher.add_handler(CallbackQueryHandler(shortener_menu, pattern="^shortener$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(batch_menu, pattern="^batch_menu$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(bot_stats, pattern="^bot_stats$"), group=0)
-    main_dispatcher.add_handler(CallbackQueryHandler(handle_settings, pattern="^(add_channel|remove_channel|set_force_sub|set_group_link|set_db_channel|set_log_channel|shortener|welcome_message|auto_delete|banner|set_webhook|anti_ban|enable_redis)$"), group=0)
+    main_dispatcher.add_handler(CallbackQueryHandler(handle_settings, pattern="^(add_channel|remove_channel|set_force_sub|set_group_link|set_db_channel|set_log_channel|shortener|set_shortener_api|set_shortener_key|disable_shortener|welcome_message|auto_delete|banner|set_webhook|anti_ban|enable_redis)$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(broadcast, pattern="^broadcast$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(cancel_broadcast, pattern="^cancel_broadcast$"), group=0)
     main_dispatcher.add_handler(CallbackQueryHandler(batch, pattern="^(generate_batch|edit_batch)$"), group=0)
