@@ -1,7 +1,8 @@
 import os
 import logging
 import json
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import telegram  # Add this to check the version
+print(f"python-telegram-bot version: {telegram.__version__}")  # Debug statement
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -15,7 +16,7 @@ from handlers.linkgen import upload, get_file, batch, genlink, batchgen
 from handlers.redirect import redirect_handler
 from handlers.error import error_handler
 from handlers.admin_activity import stats, logs, broadcast, users
-# Note: admin_management handlers will be imported after the file is created
+from handlers.admin_management import clone, settings_menu, settings_callback, handle_channel_input  # Add imports for admin_management
 from utils.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -145,11 +146,15 @@ def main():
     application.add_handler(CommandHandler("logs", logs))
     application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("users", users))
+    application.add_handler(CommandHandler("clone", clone))  # Add clone handler
+    application.add_handler(CommandHandler("settings", settings_menu))  # Add settings handler
 
     # Message and callback handlers
     application.add_handler(MessageHandler(filters.TEXT & (filters.ChatType.GROUPS | filters.ChatType.SUPERGROUP), handle_group_message))
+    application.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, handle_channel_input))  # Add handler for channel input
     application.add_handler(CallbackQueryHandler(handle_link_click, pattern="^download_"))
     application.add_handler(CallbackQueryHandler(handle_button_click, pattern="^(how_to_download|back_to_download)$"))
+    application.add_handler(CallbackQueryHandler(settings_callback, pattern="^(toggle_force_sub|set_delete_timer|set_timer_|manage_force_sub_channels|add_force_sub_channel|remove_force_sub_channel|set_shortener_|back_to_settings|back_to_main)$"))  # Add settings callback handler
     application.add_handler(CallbackQueryHandler(button_callback))
 
     # Error handler
