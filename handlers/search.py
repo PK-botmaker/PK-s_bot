@@ -5,16 +5,12 @@ import requests
 import uuid
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, JobQueue
-from utils.search_utils import search_files
+from utils.search_utils import search_files, get_related_keywords
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-FILES_STORAGE_PATH = "/opt/render/project/src/data/files.json"
-TOKEN_STORAGE_PATH = "/opt/render/project/src/data/tokens.json"
 SETTINGS_PATH = "/opt/render/project/src/data/settings.json"
-
-HOW_TO_DOWNLOAD_LINK = "https://t.me/c/2323164776/7"
 
 def send_log_to_channel(context: CallbackContext, message: str):
     """Send a log message to the Telegram log channel. 📜"""
@@ -39,12 +35,6 @@ def log_user_activity(context: CallbackContext, user_id: str, username: str, act
         cloned_bots = []
     user_bots = [bot for bot in cloned_bots if bot["owner_id"] == user_id]
     num_bots = len(user_bots)
-    files = []
-    try:
-        with open(FILES_STORAGE_PATH, "r") as f:
-            files = json.load(f)
-    except:
-        files = []
     total_users = len(get_users())
     
     table = (
@@ -54,7 +44,6 @@ def log_user_activity(context: CallbackContext, user_id: str, username: str, act
         f"│ 👤 **Username**: @{username}\n"
         f"│ 🛠️ **Action**: {action}\n"
         f"│ 🤖 **Created Bots**: {num_bots}\n"
-        f"│ 📁 **Total Files in Bot**: {len(files)}\n"
         f"│ 👥 **Total Users**: {total_users}\n"
         "└───────────────────────────────┘"
     )
@@ -69,32 +58,6 @@ def get_users():
         logger.error(f"🚨 Failed to load users: {str(e)}")
         return []
 
-def get_stored_files():
-    """Load stored files from files.json. 📂"""
-    try:
-        with open(FILES_STORAGE_PATH, "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"🚨 Failed to load stored files: {str(e)}")
-        return []
-
-def get_tokens():
-    """Load one-time link tokens from tokens.json. 🔗"""
-    try:
-        with open(TOKEN_STORAGE_PATH, "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"🚨 Failed to load tokens: {str(e)}")
-        return {}
-
-def save_tokens(tokens):
-    """Save one-time link tokens to tokens.json. 💾"""
-    try:
-        with open(TOKEN_STORAGE_PATH, "w") as f:
-            json.dump(tokens, f, indent=4)
-    except Exception as e:
-        logger.error(f"🚨 Failed to save tokens: {str(e)}")
-
 def get_settings():
     """Load bot settings from settings.json. ⚙️"""
     try:
@@ -103,6 +66,13 @@ def get_settings():
     except Exception as e:
         logger.error(f"🚨 Failed to load settings: {str(e)}")
         return {"force_subscription": False, "search_caption": "🔍 Search Result", "delete_timer": "0m", "forcesub_channels": ["@bot_paiyan_official"]}
+
+def can_shorten_url():
+    """Check if URL shortening is enabled and possible. 🔗"""
+    GPLINKS_API_KEY = os.getenv("GPLINKS_API_KEY")
+    settings = get_settings()
+    shortener = settings.get("shortener", "GPLinks")
+    return shortener != "None" and GPLINKS_API_KEY is not None
 
 def shorten_url(url):
     """Shorten a URL using GPLinks API if available, else return the raw URL. 🔗"""
@@ -163,9 +133,54 @@ def parse_file_size(size_str):
     except (ValueError, IndexError):
         return 0
 
+def fetch_files_from_channel(context: CallbackContext):
+    """
+    Fetch files from the database channel by reading recent messages. 📂
+    Assumes each message in the channel has the format:
+    Filename: <name>
+    Size: <size>
+    Link: <gdtot_link>
+    """
+    DB_CHANNEL_ID = os.getenv("DB_CHANNEL_ID")
+    if not DB_CHANNEL_ID:
+        logger.error("🚨 DB_CHANNEL_ID not set in environment variables")
+        return []
+
+    try:
+        # Fetch recent messages from the channel (limit to 100 for now)
+        messages = context.bot.get_chat_history(chat_id=DB_CHANNEL_ID, limit=100)
+        files = []
+        for idx, msg in enumerate(messages, 1):
+            if not msg.text:
+                continue
+
+            # Parse the message text to extract file metadata
+            lines = msg.text.split("\n")
+            file_data = {}
+            for line in lines:
+                if line.startswith("Filename:"):
+                    file_data["filename"] = line.replace("Filename:", "").strip()
+                elif line.startswith("Size:"):
+                    file_data["size"] = line.replace("Size:", "").strip()
+                elif line.startswith("Link:"):
+                    file_data["gdtot_link"] = line.replace("Link:", "").strip()
+
+            # Ensure all required fields are present
+            if all(key in file_data for key in ["filename", "size", "gdtot_link"]):
+                file_data["id"] = str(idx)  # Use message index as a unique ID
+                file_data["start_id"] = str(idx)  # Same as ID for consistency
+                file_data["upload_date"] = msg.date.strftime("%Y-%m-%d")  # Add upload date
+                files.append(file_data)
+
+        logger.info(f"ℹ️ Fetched {len(files)} files from database channel {DB_CHANNEL_ID}")
+        return files
+    except Exception as e:
+        logger.error(f"🚨 Failed to fetch files from channel {DB_CHANNEL_ID}: {str(e)}")
+        return []
+
 def search(update: Update, context: CallbackContext):
     """
-    Handle search command or group message to search for files with AI-like logic. 🔍
+    Handle search command or group message to search for files in the database channel. 🔍
     """
     user_id = str(update.effective_user.id)
     username = update.effective_user.username or "Unknown"
@@ -214,9 +229,10 @@ def search(update: Update, context: CallbackContext):
     send_log_to_channel(context, f"User {user_id} searched for: {query} 🔍")
     log_user_activity(context, user_id, username, f"Searched for: {query}")
 
-    files = get_stored_files()
+    # Fetch files from the database channel
+    files = fetch_files_from_channel(context)
     if not files:
-        message = update.message.reply_text("🚫 No files found in the database. 😢")
+        message = update.message.reply_text("🚫 No files found in the database channel. 😢")
         delete_timer = parse_delete_timer(settings.get("delete_timer", "0m"))
         schedule_message_deletion(context, update.message.chat_id, message.message_id, delete_timer)
         return
@@ -230,26 +246,31 @@ def search(update: Update, context: CallbackContext):
 
     settings = get_settings()
     caption = settings.get("search_caption", "🔍 Search Result")
-    tokens = get_tokens()
-    RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+    can_shorten = can_shorten_url()  # Check if we can shorten URLs
 
+    # Display search results
     for idx, file in enumerate(matching_files, 1):
         gdtot_link = file.get("gdtot_link")
         if not gdtot_link:
             continue
 
-        token = str(uuid.uuid4())
-        tokens[token] = gdtot_link
-        context.bot_data["token_for_" + file.get("start_id")] = token
-        save_tokens(tokens)
+        # Shorten the link only if we can (will be displayed if shortened)
+        display_url = None
+        if can_shorten:
+            display_url = shorten_url(gdtot_link)
 
-        redirect_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/redirect/{token}"
-        shortened_url = shorten_url(redirect_url)
+        # Prepare the search result message
+        group_response = (
+            f"{caption}\n\n"
+            f"{idx}. **{file.get('filename')}** ({file.get('size', 'Unknown size')})\n"
+            f"📅 **Uploaded**: {file.get('upload_date', 'Unknown')}\n"
+        )
+        if display_url:
+            group_response += f"🔗 **Download Link**: {display_url}\n"
 
-        group_response = f"{caption}\n\n{idx}. {file.get('filename')} ({file.get('size', 'Unknown size')})"
-        keyboard = [[InlineKeyboardButton("☁️ Get Download Link 📥", callback_data=f"download_{file.get('start_id')}")]]
+        keyboard = [[InlineKeyboardButton("📥 Download Now", callback_data=f"download_{file.get('start_id')}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        group_message = update.message.reply_text(group_response, reply_markup=reply_markup)
+        group_message = update.message.reply_text(group_response, reply_markup=reply_markup, parse_mode="Markdown")
         send_log_to_channel(context, f"User {user_id} received search result: {file.get('filename')} 🔍")
 
         delete_timer = parse_delete_timer(settings.get("delete_timer", "0m"))
@@ -257,115 +278,43 @@ def search(update: Update, context: CallbackContext):
 
 def handle_link_click(update: Update, context: CallbackContext):
     """
-    Handle the click on a download button to send the link to the user in DM. 📥
+    Handle the click on a download button to redirect the user directly to the file. 📥
     """
     query = update.callback_query
     user_id = str(query.from_user.id)
     username = query.from_user.username or "Unknown"
     start_id = query.data.split("_")[-1]
-    token_key = f"token_for_{start_id}"
-    token = context.bot_data.get(token_key)
 
-    if not token:
-        query.message.edit_text("🚫 Link expired or invalid. 😓")
-        send_log_to_channel(context, f"User {user_id} tried to access expired/invalid link for start_id {start_id} 🚫")
-        log_user_activity(context, user_id, username, f"Tried to Access Expired/Invalid Link (start_id: {start_id})")
+    # Fetch files again to find the matching file
+    files = fetch_files_from_channel(context)
+    file = next((f for f in files if f["start_id"] == start_id), None)
+    if not file:
+        query.message.edit_text("🚫 File not found or link expired. 😓")
+        send_log_to_channel(context, f"User {user_id} tried to access non-existent file with start_id {start_id} 🚫")
+        log_user_activity(context, user_id, username, f"Tried to Access Non-Existent File (start_id: {start_id})")
         return
 
-    tokens = get_tokens()
-    gdtot_link = tokens.get(token)
+    gdtot_link = file.get("gdtot_link")
     if not gdtot_link:
-        query.message.edit_text("🚫 Link expired or invalid. 😓")
-        send_log_to_channel(context, f"User {user_id} tried to access expired/invalid link for start_id {start_id} 🚫")
-        log_user_activity(context, user_id, username, f"Tried to Access Expired/Invalid Link (start_id: {start_id})")
+        query.message.edit_text("🚫 Download link not available. 😓")
+        send_log_to_channel(context, f"User {user_id} tried to access invalid link for start_id {start_id} 🚫")
+        log_user_activity(context, user_id, username, f"Tried to Access Invalid Link (start_id: {start_id})")
         return
 
-    # Parse file size to determine if it's greater than 2 GB 📏
-    file_size_str = query.message.text.split('(')[1].split(')')[0]
-    file_size_gb = parse_file_size(file_size_str)
-    is_large_file = file_size_gb > 2
+    # Shorten the link if possible (for the redirect)
+    final_url = shorten_url(gdtot_link)
 
-    # Shorten the cloud link 🔗
-    shortened_url = shorten_url(gdtot_link)
-
-    # Prepare DM message based on file size 💬
-    if is_large_file:
-        dm_text = (
-            "✨ **Download Your File!** ✨\n\n"
-            f"📁 **File**: {query.message.text.split('\n\n')[-1].split('(')[0].strip()}\n"
-            f"📏 **Size**: {file_size_str}\n"
-            "⚠️ **Note**: This file is larger than 2 GB. A cloud link has been provided for download. ☁️\n\n"
-            "👇 **Choose an Option Below** 👇"
-        )
-    else:
-        dm_text = (
-            "✨ **Download Your File!** ✨\n\n"
-            f"📁 **File**: {query.message.text.split('\n\n')[-1].split('(')[0].strip()}\n"
-            f"📏 **Size**: {file_size_str}\n\n"
-            "👇 **Choose an Option Below** 👇"
-        )
-
-    keyboard = [
-        [
-            InlineKeyboardButton("📩 Telegram Download", url=shortened_url, callback_data=f"download_{token}"),
-            InlineKeyboardButton("❓ How to Download", callback_data="how_to_download")
-        ],
-        [
-            InlineKeyboardButton("⚡ Gen Fast Download", url=shortened_url, callback_data=f"download_{token}")
-        ]
-    ]
+    # Redirect the user directly to the download link
+    keyboard = [[InlineKeyboardButton("📥 Download File", url=final_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    try:
-        dm_message = context.bot.send_message(
-            chat_id=user_id,
-            text=dm_text,
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-        send_log_to_channel(context, f"User {user_id} received download link for file with start_id {start_id} 📥")
-        log_user_activity(context, user_id, username, f"Received Download Link for File (start_id: {start_id})")
-
-        # Schedule message deletion ⏳
-        settings = get_settings()
-        delete_timer = parse_delete_timer(settings.get("delete_timer", "0m"))
-        schedule_message_deletion(context, dm_message.chat_id, dm_message.message_id, delete_timer)
-
-        # Delete the token after use (one-time link) 🔗
-        tokens.pop(token, None)
-        save_tokens(tokens)
-        context.bot_data.pop(token_key, None)
-
-        query.message.edit_text(f"✅ Link sent to your DM! Check your messages. 📩")
-    except Exception as e:
-        query.message.edit_text("🚫 Failed to send the link to your DM. Please allow DMs from this bot. 😓")
-        send_log_to_channel(context, f"User {user_id} failed to receive DM for file with start_id {start_id}: {str(e)} 🚫")
-        log_user_activity(context, user_id, username, f"Failed to Receive DM for File (start_id: {start_id})")
-
-def handle_button_click(update: Update, context: CallbackContext):
-    """
-    Handle button clicks in the private DM. 🔄
-    """
-    query = update.callback_query
-    user_id = str(query.from_user.id)
-    username = query.from_user.username or "Unknown"
-    data = query.data
-
-    if data.startswith("download_"):
-        context.bot.delete_message(chat_id=user_id, message_id=query.message.message_id)
-        send_log_to_channel(context, f"User {user_id} downloaded file via button. 📥")
-        log_user_activity(context, user_id, username, "Downloaded File via Button")
-    elif data == "how_to_download":
-        keyboard = [[InlineKeyboardButton("🔙 Back to Download 🔄", callback_data="back_to_download")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.message.edit_text(f"📚 Follow this guide to download your file! 📖\n{HOW_TO_DOWNLOAD_LINK}", reply_markup=reply_markup)
-        send_log_to_channel(context, f"User {user_id} viewed How to Download guide. 📚")
-        log_user_activity(context, user_id, username, "Viewed How to Download Guide")
-    elif data == "back_to_download":
-        # Restore the original download link message
-        query.message.edit_text(query.message.text, reply_markup=query.message.reply_markup)
-        send_log_to_channel(context, f"User {user_id} returned to download link. 🔄")
-        log_user_activity(context, user_id, username, "Returned to Download Link")
+    query.message.edit_text(
+        f"✅ Redirecting to your file: **{file.get('filename')}** 🎉\n"
+        f"Click below to start the download! 📩",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    send_log_to_channel(context, f"User {user_id} redirected to download file with start_id {start_id} 📥")
+    log_user_activity(context, user_id, username, f"Redirected to Download File (start_id: {start_id})")
 
 def handle_group_message(update: Update, context: CallbackContext):
     """Handle all group messages as search queries. 💬"""
