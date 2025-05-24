@@ -1,60 +1,43 @@
-import re
+import logging
 from typing import List, Dict
 
-def calculate_score(query: str, filename: str) -> float:
-    """
-    Calculate a weighted score for a file based on the search query. 📊
-    Weights:
-    - Exact match: 100 ✅
-    - Word match: 20 per word 🔡
-    - Partial match: 5 per character overlap 🔤
-    """
-    query = query.lower().strip()
-    filename = filename.lower()
-
-    score = 0.0
-
-    # Exact match 🎯
-    if query == filename:
-        return 100.0
-
-    # Split query into words 🔠
-    query_words = set(re.split(r"\W+", query))
-    filename_words = set(re.split(r"\W+", filename))
-
-    # Word matches 🔡
-    common_words = query_words.intersection(filename_words)
-    score += len(common_words) * 20
-
-    # Partial matches (character overlap) 🔤
-    for q_word in query_words:
-        for f_word in filename_words:
-            if q_word in f_word or f_word in q_word:
-                overlap = len(set(q_word).intersection(set(f_word)))
-                score += overlap * 5
-
-    return score
+logger = logging.getLogger(__name__)
 
 def search_files(query: str, files: List[Dict], limit: int = 5) -> List[Dict]:
     """
-    Search for files matching the query using weighted scoring. 🔍
+    Search for files matching the query with AI-like logic. 🔍
+    Scores files based on exact match, word match, and partial match.
     """
     if not query or not files:
         return []
 
-    # Calculate scores for each file 📊
+    query = query.lower().strip()
     scored_files = []
+
     for file in files:
-        filename = file.get("filename", "")
+        filename = file.get("filename", "").lower()
         if not filename:
             continue
 
-        score = calculate_score(query, filename)
+        score = 0
+
+        # Exact match (highest score) 🎯
+        if query == filename:
+            score += 100
+        else:
+            # Word match (split query and filename into words) 📝
+            query_words = set(query.split())
+            filename_words = set(filename.split())
+            common_words = query_words.intersection(filename_words)
+            score += len(common_words) * 20
+
+            # Partial match (check if query is a substring of filename) 🔡
+            if query in filename:
+                score += 10
+
         if score > 0:
-            scored_files.append((score, file))
+            scored_files.append((file, score))
 
-    # Sort by score in descending order 📉
-    scored_files.sort(key=lambda x: x[0], reverse=True)
-
-    # Return top results 🏆
-    return [file for _, file in scored_files[:limit]]
+    # Sort by score in descending order and limit results 📊
+    scored_files.sort(key=lambda x: x[1], reverse=True)
+    return [file for file, score in scored_files[:limit]]
