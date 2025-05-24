@@ -4,7 +4,6 @@ import json
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -88,203 +87,213 @@ def get_settings():
             return json.load(f)
     except Exception as e:
         logger.error(f"🚨 Failed to load settings: {str(e)}")
-        return {"shortener": "GPLinks"}
+        return {"force_subscription": False, "search_caption": "🔍 Search Result", "delete_timer": "0m", "forcesub_channels": ["@bot_paiyan_official"]}
 
-def shorten_url(url):
-    """Shorten a URL using GPLinks API if available, else return the raw URL. 🔗"""
-    GPLINKS_API_KEY = os.getenv("GPLINKS_API_KEY")
-    settings = get_settings()
-    shortener = settings.get("shortener", "GPLinks")
-
-    if shortener == "None" or not GPLINKS_API_KEY:
-        logger.info("ℹ️ GPLinks API key not set or shortener disabled, using raw URL")
-        return url
+def upload_to_gdtot(file_url):
+    """Upload a file to GDToT and return the download link. 📤"""
+    GDTOT_API_KEY = os.getenv("GDTOT_API_KEY")
+    if not GDTOT_API_KEY:
+        logger.error("🚨 GDTOT_API_KEY not set in environment variables")
+        return None
 
     try:
-        api_url = f"https://gplinks.co/api?api={GPLINKS_API_KEY}&url={url}"
+        api_url = f"https://gdtot.com/api/upload?api_key={GDTOT_API_KEY}&url={file_url}"
         response = requests.get(api_url)
         data = response.json()
         if data.get("status") == "success":
-            return data.get("shortenedUrl")
-        logger.error(f"🚨 Failed to shorten URL: {data.get('message')}")
-        return url
+            return data.get("download_link")
+        logger.error(f"🚨 Failed to upload to GDToT: {data.get('message')}")
+        return None
     except Exception as e:
-        logger.error(f"🚨 Error shortening URL: {str(e)}")
-        return url
-
-def upload_to_gdtot(file_path: str, file_name: str) -> str:
-    """Placeholder for uploading to GDToT. 📤"""
-    try:
-        logger.info(f"ℹ️ Uploading {file_name} to GDToT 📦")
-        gdtot_link = f"https://new.gdtot.com/file/{hash(file_name)}"
-        return gdtot_link
-    except Exception as e:
-        logger.error(f"🚨 Failed to upload to GDToT: {str(e)}")
-        return ""
+        logger.error(f"🚨 Error uploading to GDToT: {str(e)}")
+        return None
 
 def upload(update: Update, context: CallbackContext):
-    """Handle /upload command to upload a file to GDToT. 📤"""
+    """Handle file upload to GDToT and store metadata. 📤"""
     user_id = str(update.effective_user.id)
     username = update.effective_user.username or "Unknown"
+    args = context.args
 
-    if not update.message.document:
-        update.message.reply_text("🚫 Please send a file to upload. 📁")
+    if not args:
+        update.message.reply_text("🚫 Please provide a file URL to upload.\nExample: /upload https://example.com/file.mp4 😅")
         return
 
-    file = update.message.document
-    file_name = file.file_name
-    file_id = file.file_id
+    file_url = args[0]
+    logger.info(f"ℹ️ User {user_id} uploading file: {file_url}")
+    send_log_to_channel(context, f"User {user_id} initiated file upload: {file_url} 📤")
+    log_user_activity(context, user_id, username, f"Initiated File Upload: {file_url}")
+
+    gdtot_link = upload_to_gdtot(file_url)
+    if not gdtot_link:
+        update.message.reply_text("🚫 Failed to upload the file to GDToT. 😓")
+        send_log_to_channel(context, f"User {user_id} failed to upload file: {file_url} 🚫")
+        log_user_activity(context, user_id, username, f"Failed File Upload: {file_url}")
+        return
 
     files = get_stored_files()
-    start_id = str(len(files) + 1)
-
-    file_info = {
-        "start_id": start_id,
-        "filename": file_name,
-        "size": f"{file.file_size / (1024 * 1024):.2f} MB",
-        "file_id": file_id,
-        "uploaded_at": datetime.now().isoformat()
+    file_id = str(len(files) + 1)
+    file_metadata = {
+        "id": file_id,
+        "start_id": file_id,
+        "filename": file_url.split("/")[-1],
+        "size": "Unknown size",  # GDToT API would need to provide this
+        "gdtot_link": gdtot_link
     }
-
-    gdtot_link = upload_to_gdtot(None, file_name)
-    if not gdtot_link:
-        update.message.reply_text("🚫 Failed to upload to GDToT. 😓")
-        return
-
-    file_info["gdtot_link"] = gdtot_link
-    files.append(file_info)
+    files.append(file_metadata)
     save_files(files)
 
-    shortened_url = shorten_url(gdtot_link)
-    update.message.reply_text(f"✅ File uploaded successfully! 🎉\nStart ID: {start_id}\nLink: {shortened_url}")
-    send_log_to_channel(context, f"User {user_id} uploaded file with start_id {start_id}: {file_name} 📤")
-    log_user_activity(context, user_id, username, f"Uploaded File (start_id: {start_id})")
+    update.message.reply_text(
+        f"✅ File uploaded successfully! 🎉\n\n"
+        f"📁 **File ID**: {file_id}\n"
+        f"🔗 **Download Link**: {gdtot_link}",
+        parse_mode="Markdown"
+    )
+    send_log_to_channel(context, f"User {user_id} uploaded file with ID {file_id} 📤")
+    log_user_activity(context, user_id, username, f"Uploaded File with ID: {file_id}")
 
 def get_file(update: Update, context: CallbackContext):
-    """Handle /get command to retrieve a file by start_id. 📁"""
+    """Retrieve a file by ID. 📁"""
     user_id = str(update.effective_user.id)
     username = update.effective_user.username or "Unknown"
     args = context.args
 
     if not args:
-        update.message.reply_text("🚫 Please provide a start_id.\nExample: /get 1 😅")
+        update.message.reply_text("🚫 Please provide a file ID.\nExample: /get 1 😅")
         return
 
-    start_id = args[0]
+    file_id = args[0]
+    logger.info(f"ℹ️ User {user_id} retrieving file with ID: {file_id}")
+    send_log_to_channel(context, f"User {user_id} requested file with ID: {file_id} 📁")
+    log_user_activity(context, user_id, username, f"Requested File with ID: {file_id}")
+
     files = get_stored_files()
-    file = next((f for f in files if f["start_id"] == start_id), None)
-
+    file = next((f for f in files if f["id"] == file_id), None)
     if not file:
-        update.message.reply_text(f"🚫 File with start_id {start_id} not found. 😓")
+        update.message.reply_text(f"🚫 File with ID {file_id} not found. 😓")
+        send_log_to_channel(context, f"User {user_id} requested non-existent file ID: {file_id} 🚫")
+        log_user_activity(context, user_id, username, f"Requested Non-Existent File ID: {file_id}")
         return
 
-    gdtot_link = file.get("gdtot_link")
-    if not gdtot_link:
-        update.message.reply_text("🚫 No GDToT link available for this file. 😓")
-        return
-
-    shortened_url = shorten_url(gdtot_link)
-    response = f"📁 File: {file['filename']}\n📏 Size: {file['size']}\n🔗 Link: {shortened_url}"
-    update.message.reply_text(response)
-    send_log_to_channel(context, f"User {user_id} retrieved file with start_id {start_id} 📁")
-    log_user_activity(context, user_id, username, f"Retrieved File (start_id: {start_id})")
+    response = (
+        f"📁 **File Details** 📁\n\n"
+        f"🆔 **ID**: {file['id']}\n"
+        f"📄 **Name**: {file['filename']}\n"
+        f"📏 **Size**: {file.get('size', 'Unknown size')}\n"
+        f"🔗 **Download Link**: {file['gdtot_link']}"
+    )
+    update.message.reply_text(response, parse_mode="Markdown")
+    send_log_to_channel(context, f"User {user_id} retrieved file with ID: {file_id} 📁")
+    log_user_activity(context, user_id, username, f"Retrieved File with ID: {file_id}")
 
 def batch(update: Update, context: CallbackContext):
-    """Handle /batch command to retrieve a range of files. 📦"""
+    """Retrieve a range of files by ID. 📦"""
     user_id = str(update.effective_user.id)
     username = update.effective_user.username or "Unknown"
     args = context.args
 
     if len(args) != 2:
-        update.message.reply_text("🚫 Please provide start_id and end_id.\nExample: /batch 1 5 😅")
+        update.message.reply_text("🚫 Please provide a start and end ID.\nExample: /batch 1 5 😅")
         return
 
     try:
-        start_id, end_id = map(int, args)
+        start_id = int(args[0])
+        end_id = int(args[1])
     except ValueError:
-        update.message.reply_text("🚫 Start_id and end_id must be numbers. 😅")
+        update.message.reply_text("🚫 IDs must be numbers.\nExample: /batch 1 5 😅")
         return
+
+    logger.info(f"ℹ️ User {user_id} retrieving batch files from ID {start_id} to {end_id}")
+    send_log_to_channel(context, f"User {user_id} requested batch files from ID {start_id} to {end_id} 📦")
+    log_user_activity(context, user_id, username, f"Requested Batch Files from ID {start_id} to {end_id}")
 
     files = get_stored_files()
-    batch_files = [f for f in files if start_id <= int(f["start_id"]) <= end_id]
-
+    batch_files = [f for f in files if start_id <= int(f["id"]) <= end_id]
     if not batch_files:
-        update.message.reply_text(f"🚫 No files found between start_id {start_id} and end_id {end_id}. 😓")
+        update.message.reply_text(f"🚫 No files found between IDs {start_id} and {end_id}. 😓")
+        send_log_to_channel(context, f"User {user_id} found no files between IDs {start_id} and {end_id} 🚫")
+        log_user_activity(context, user_id, username, f"Found No Files between IDs {start_id} to {end_id}")
         return
 
-    response = "📦 Batch Files:\n\n"
+    response = f"📦 **Batch Files (IDs {start_id} to {end_id})** 📦\n\n"
     for file in batch_files:
-        gdtot_link = file.get("gdtot_link")
-        if gdtot_link:
-            shortened_url = shorten_url(gdtot_link)
-            response += f"📁 File: {file['filename']}\n📏 Size: {file['size']}\n🔗 Link: {shortened_url}\n\n"
-        else:
-            response += f"📁 File: {file['filename']} (No link available)\n"
-
-    update.message.reply_text(response)
-    send_log_to_channel(context, f"User {user_id} retrieved batch files from start_id {start_id} to {end_id} 📦")
-    log_user_activity(context, user_id, username, f"Retrieved Batch Files (start_id: {start_id} to {end_id})")
+        response += (
+            f"🆔 **ID**: {file['id']}\n"
+            f"📄 **Name**: {file['filename']}\n"
+            f"📏 **Size**: {file.get('size', 'Unknown size')}\n"
+            f"🔗 **Download Link**: {file['gdtot_link']}\n\n"
+        )
+    update.message.reply_text(response, parse_mode="Markdown")
+    send_log_to_channel(context, f"User {user_id} retrieved batch files from ID {start_id} to {end_id} 📦")
+    log_user_activity(context, user_id, username, f"Retrieved Batch Files from ID {start_id} to {end_id}")
 
 def genlink(update: Update, context: CallbackContext):
-    """Handle /genlink command to generate a link for a specific file. 🔗"""
+    """Generate a download link for a file by ID. 🔗"""
     user_id = str(update.effective_user.id)
     username = update.effective_user.username or "Unknown"
     args = context.args
 
     if not args:
-        update.message.reply_text("🚫 Please provide a start_id.\nExample: /genlink 1 😅")
+        update.message.reply_text("🚫 Please provide a file ID.\nExample: /genlink 1 😅")
         return
 
-    start_id = args[0]
+    file_id = args[0]
+    logger.info(f"ℹ️ User {user_id} generating link for file with ID: {file_id}")
+    send_log_to_channel(context, f"User {user_id} requested link generation for file with ID: {file_id} 🔗")
+    log_user_activity(context, user_id, username, f"Requested Link Generation for File ID: {file_id}")
+
     files = get_stored_files()
-    file = next((f for f in files if f["start_id"] == start_id), None)
-
+    file = next((f for f in files if f["id"] == file_id), None)
     if not file:
-        update.message.reply_text(f"🚫 File with start_id {start_id} not found. 😓")
+        update.message.reply_text(f"🚫 File with ID {file_id} not found. 😓")
+        send_log_to_channel(context, f"User {user_id} requested link for non-existent file ID: {file_id} 🚫")
+        log_user_activity(context, user_id, username, f"Requested Link for Non-Existent File ID: {file_id}")
         return
 
-    gdtot_link = file.get("gdtot_link")
-    if not gdtot_link:
-        update.message.reply_text("🚫 No GDToT link available for this file. 😓")
-        return
-
-    shortened_url = shorten_url(gdtot_link)
-    update.message.reply_text(f"🔗 Generated Link: {shortened_url} 🎉")
-    send_log_to_channel(context, f"User {user_id} generated link for file with start_id {start_id} 🔗")
-    log_user_activity(context, user_id, username, f"Generated Link for File (start_id: {start_id})")
+    update.message.reply_text(
+        f"🔗 **Generated Link** 🔗\n\n"
+        f"📁 **File ID**: {file_id}\n"
+        f"🔗 **Download Link**: {file['gdtot_link']}",
+        parse_mode="Markdown"
+    )
+    send_log_to_channel(context, f"User {user_id} generated link for file with ID: {file_id} 🔗")
+    log_user_activity(context, user_id, username, f"Generated Link for File ID: {file_id}")
 
 def batchgen(update: Update, context: CallbackContext):
-    """Handle /batchgen command to generate links for a range of files. 🔗"""
+    """Generate download links for a range of files by ID. 📢"""
     user_id = str(update.effective_user.id)
     username = update.effective_user.username or "Unknown"
     args = context.args
 
     if len(args) != 2:
-        update.message.reply_text("🚫 Please provide start_id and end_id.\nExample: /batchgen 1 5 😅")
+        update.message.reply_text("🚫 Please provide a start and end ID.\nExample: /batchgen 1 5 😅")
         return
 
     try:
-        start_id, end_id = map(int, args)
+        start_id = int(args[0])
+        end_id = int(args[1])
     except ValueError:
-        update.message.reply_text("🚫 Start_id and end_id must be numbers. 😅")
+        update.message.reply_text("🚫 IDs must be numbers.\nExample: /batchgen 1 5 😅")
         return
+
+    logger.info(f"ℹ️ User {user_id} generating batch links from ID {start_id} to {end_id}")
+    send_log_to_channel(context, f"User {user_id} requested batch link generation from ID {start_id} to {end_id} 📢")
+    log_user_activity(context, user_id, username, f"Requested Batch Link Generation from ID {start_id} to {end_id}")
 
     files = get_stored_files()
-    batch_files = [f for f in files if start_id <= int(f["start_id"]) <= end_id]
-
+    batch_files = [f for f in files if start_id <= int(f["id"]) <= end_id]
     if not batch_files:
-        update.message.reply_text(f"🚫 No files found between start_id {start_id} and end_id {end_id}. 😓")
+        update.message.reply_text(f"🚫 No files found between IDs {start_id} and {end_id}. 😓")
+        send_log_to_channel(context, f"User {user_id} found no files for batch link generation between IDs {start_id} and {end_id} 🚫")
+        log_user_activity(context, user_id, username, f"Found No Files for Batch Link Generation between IDs {start_id} to {end_id}")
         return
 
-    response = "🔗 Batch Generated Links:\n\n"
+    response = f"📢 **Batch Generated Links (IDs {start_id} to {end_id})** 📢\n\n"
     for file in batch_files:
-        gdtot_link = file.get("gdtot_link")
-        if gdtot_link:
-            shortened_url = shorten_url(gdtot_link)
-            response += f"📁 File: {file['filename']}\n📏 Size: {file['size']}\n🔗 Link: {shortened_url}\n\n"
-        else:
-            response += f"📁 File: {file['filename']} (No link available)\n"
-
-    update.message.reply_text(response)
-    send_log_to_channel(context, f"User {user_id} generated batch links from start_id {start_id} to {end_id} 🔗")
-    log_user_activity(context, user_id, username, f"Generated Batch Links (start_id: {start_id} to {end_id})")
+        response += (
+            f"🆔 **ID**: {file['id']}\n"
+            f"📄 **Name**: {file['filename']}\n"
+            f"🔗 **Download Link**: {file['gdtot_link']}\n\n"
+        )
+    update.message.reply_text(response, parse_mode="Markdown")
+    send_log_to_channel(context, f"User {user_id} generated batch links from ID {start_id} to {end_id} 📢")
+    log_user_activity(context, user_id, username, f"Generated Batch Links from ID {start_id} to {end_id}")
