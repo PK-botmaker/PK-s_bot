@@ -1,248 +1,162 @@
 import os
 import logging
 import json
-import requests
-from telegram import Update, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
     filters,
-    ContextTypes,
+    CallbackContext,
 )
-from handlers.admin import (
-    start,
-    clone_bot_menu,
-    create_clone_bot,
-    handle_clone_input,
-    handle_visibility_selection,
-    handle_usage_selection,
-    view_clone_bots,
-    delete_clone_bot,
-    confirm_delete_bot,
-    toggle_force_subscription,
-    set_caption,
-    handle_caption_input,
-    broadcast,
-    handle_broadcast_input,
-    bot_stats,
-    settings_menu,
-    batch_menu,
-    shortener_menu,
-    set_shortener,
-    tutorial,
-    back_to_main,
-    set_delete_timer,
-    handle_delete_timer_input,
-    forcesub_menu,
-    add_forcesub_channel,
-    handle_forcesub_input,
-    about_cloned_bot,
-)
-from handlers.search import search, handle_group_message, handle_link_click, handle_button_click
+from handlers.search import search, handle_link_click, handle_button_click, handle_group_message
 from handlers.linkgen import upload, get_file, batch, genlink, batchgen
 from handlers.redirect import redirect_handler
 from handlers.error import error_handler
+from handlers.admin_activity import stats, logs, broadcast, users
+# Note: admin_management handlers will be imported after the file is created
 from utils.logging_utils import setup_logging
 
-# Setup logging 📜
-setup_logging()
 logger = logging.getLogger(__name__)
 
-# Paths 📂
-CLONED_BOTS_PATH = "/opt/render/project/src/data/cloned_bots.json"
-FILES_STORAGE_PATH = "/opt/render/project/src/data/files.json"
-ADMINS_PATH = "/opt/render/project/src/data/admins.json"
+SETTINGS_PATH = "/opt/render/project/src/data/settings.json"
 
-# Initialize admins file 🔒
-if not os.path.exists(ADMINS_PATH):
-    with open(ADMINS_PATH, "w") as f:
-        json.dump([], f)
-
-def get_admins():
-    """Load admin IDs from admins.json. 🔑"""
+def load_settings():
+    """Load bot settings from settings.json. ⚙️"""
     try:
-        with open(ADMINS_PATH, "r") as f:
+        with open(SETTINGS_PATH, "r") as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"🚨 Failed to load admins: {str(e)}")
-        return []
+        logger.error(f"🚨 Failed to load settings: {str(e)}")
+        return {"force_subscription": False, "search_caption": "🔍 Search Result", "delete_timer": "0m", "forcesub_channels": ["@bot_paiyan_official"]}
 
-def save_admins(admins):
-    """Save admin IDs to admins.json. 💾"""
+def save_settings(settings):
+    """Save bot settings to settings.json. 💾"""
     try:
-        with open(ADMINS_PATH, "w") as f:
-            json.dump(admins, f, indent=4)
+        with open(SETTINGS_PATH, "w") as f:
+            json.dump(settings, f, indent=4)
     except Exception as e:
-        logger.error(f"🚨 Failed to save admins: {str(e)}")
+        logger.error(f"🚨 Failed to save settings: {str(e)}")
 
-def get_cloned_bots():
-    """Load cloned bots from cloned_bots.json. 🤖"""
+def load_users():
+    """Load user IDs from users.json. 👥"""
     try:
-        with open(CLONED_BOTS_PATH, "r") as f:
+        with open("/opt/render/project/src/data/users.json", "r") as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"🚨 Failed to load cloned bots: {str(e)}")
+        logger.error(f"🚨 Failed to load users: {str(e)}")
         return []
 
-def save_cloned_bots(cloned_bots):
-    """Save cloned bots to cloned_bots.json. 💾"""
+def save_users(users):
+    """Save user IDs to users.json. 💾"""
     try:
-        with open(CLONED_BOTS_PATH, "w") as f:
-            json.dump(cloned_bots, f, indent=4)
+        with open("/opt/render/project/src/data/users.json", "w") as f:
+            json.dump(users, f, indent=4)
     except Exception as e:
-        logger.error(f"🚨 Failed to save cloned bots: {str(e)}")
+        logger.error(f"🚨 Failed to save users: {str(e)}")
 
-def upload_to_gdtot(file_path: str, file_name: str) -> str:
-    """Placeholder for uploading to GDToT. 📤"""
-    GDTOT_API_KEY = os.getenv("GDTOT_API_KEY")
-    if not GDTOT_API_KEY:
-        logger.error("🚨 GDTOT_API_KEY not set in environment variables")
-        return ""
+async def start(update: Update, context: CallbackContext):
+    """Handle the /start command and set the first user as admin. 🚀"""
+    user_id = str(update.effective_user.id)
+    username = update.effective_user.username or "Unknown"
+    users = load_users()
+    settings = load_settings()
 
-    try:
-        logger.info(f"ℹ️ Uploading {file_name} to GDToT 📦")
-        gdtot_link = f"https://new.gdtot.com/file/{hash(file_name)}"
-        return gdtot_link
-    except Exception as e:
-        logger.error(f"🚨 Failed to upload to GDToT: {str(e)}")
-        return ""
+    # Set the first user as admin 🔑
+    if not settings.get("admin_id") and not users:
+        settings["admin_id"] = user_id
+        save_settings(settings)
+        logger.info(f"ℹ️ User {user_id} set as admin")
 
-async def start_cloned_bot(token: str, admin_ids: list, bot_type: str) -> bool:
-    """Start a cloned bot with the given token and type. 🚀"""
-    try:
-        app = Application.builder().token(token).build()
+    # Add user to users.json if not already present 👥
+    if user_id not in users:
+        users.append(user_id)
+        save_users(users)
+        logger.info(f"ℹ️ New user added: {user_id}")
 
-        # Add common handlers 📲
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(MessageHandler(filters.ChatType.GROUP & ~filters.COMMAND, handle_group_message))
-        app.add_handler(MessageHandler(filters.ChatType.SUPERGROUP & ~filters.COMMAND, handle_group_message))
-        app.add_handler(CallbackQueryHandler(handle_link_click, pattern="^download_"))
-        app.add_handler(CallbackQueryHandler(handle_button_click, pattern="^(download_|how_to_download|back_to_download)"))
-        app.add_handler(CallbackQueryHandler(about_cloned_bot, pattern="^about_cloned_bot$"))
+    # Prepare welcome message with buttons 🎉
+    keyboard = [
+        [InlineKeyboardButton("🔍 Search Files", callback_data="search_info")],
+        [InlineKeyboardButton("ℹ️ About Bot", callback_data="about_bot")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    welcome_message = (
+        "🎉 **Welcome to TamilSender Bot!** 🎉\n\n"
+        "🔍 Use /search to find files\n"
+        "📤 Use /upload to upload files\n"
+        "📁 Use /get to retrieve a file by ID\n"
+        "📦 Use /batch to get a range of files\n"
+        "🔗 Use /genlink to generate a link\n"
+        "📢 Use /batchgen for batch links\n\n"
+        "👇 **Choose an option below** 👇"
+    )
+    await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
 
-        # Add type-specific handlers 🛠️
-        if bot_type == "searchbot":
-            app.add_handler(CommandHandler("search", search))
-        elif bot_type == "filestorebot":
-            app.add_handler(CommandHandler("upload", upload))
-            app.add_handler(CommandHandler("get", get_file))
-            app.add_handler(CommandHandler("batch", batch))
-            app.add_handler(CommandHandler("genlink", genlink))
-            app.add_handler(CommandHandler("batchgen", batchgen))
+async def button_callback(update: Update, context: CallbackContext):
+    """Handle button callbacks in the /start command. 🔄"""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    username = query.from_user.username or "Unknown"
 
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
-        logger.info(f"✅ Cloned bot with token ending {token[-4:]} started successfully as {bot_type} 🎉")
-        return True
-    except Exception as e:
-        logger.error(f"🚨 Failed to start cloned bot with token ending {token[-4:]}: {str(e)}")
-        return False
-
-def pre_upload_files():
-    """Pre-upload files to GDToT during bot startup. 📤"""
-    files = []
-    try:
-        with open(FILES_STORAGE_PATH, "r") as f:
-            files = json.load(f)
-    except Exception as e:
-        logger.error(f"🚨 Failed to load files for pre-upload: {str(e)}")
-        return
-
-    for file in files:
-        if "gdtot_link" not in file:
-            file_path = file.get("path")
-            file_name = file.get("filename")
-            gdtot_link = upload_to_gdtot(file_path, file_name)
-            if gdtot_link:
-                file["gdtot_link"] = gdtot_link
-                logger.info(f"✅ Pre-uploaded {file_name} to GDToT: {gdtot_link} 🎉")
-
-    try:
-        with open(FILES_STORAGE_PATH, "w") as f:
-            json.dump(files, f, indent=4)
-    except Exception as e:
-        logger.error(f"🚨 Failed to save pre-uploaded files: {str(e)}")
+    if query.data == "search_info":
+        await query.message.edit_text(
+            "🔍 **Search Files** 🔍\n\n"
+            "Use /search followed by a keyword to find files.\n"
+            "Example: /search Avengers 😅\n\n"
+            "Or type your query directly in a group chat! 💬",
+            parse_mode="Markdown"
+        )
+    elif query.data == "about_bot":
+        settings = load_settings()
+        creation_date = settings.get("creation_date", "2025-05-01")
+        about_message = (
+            "ℹ️ **About TamilSender Bot** ℹ️\n\n"
+            "👤 **Owner**: @Dhileep_S\n"
+            "🤖 **Developer**: @Dhileep_S\n"
+            "📜 **Cloned From**: @tamilsender_bot\n"
+            "🌐 **Language**: Tamil\n"
+            "📌 **Bot Type**: File Sharing\n"
+            "🔒 **Visibility**: Public\n"
+            f"🕒 **Created On**: {creation_date}"
+        )
+        await query.message.edit_text(about_message, parse_mode="Markdown")
 
 def main():
-    """Main function to start the bot. 🚀"""
+    """Start the bot. 🚀"""
+    setup_logging()
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-    RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-
     if not TELEGRAM_BOT_TOKEN:
         logger.error("🚨 TELEGRAM_BOT_TOKEN not set in environment variables")
         return
 
-    if not RENDER_EXTERNAL_HOSTNAME:
-        logger.error("🚨 RENDER_EXTERNAL_HOSTNAME not set in environment variables")
-        return
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    pre_upload_files()
+    # Command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("search", search))
+    application.add_handler(CommandHandler("upload", upload))
+    application.add_handler(CommandHandler("get", get_file))
+    application.add_handler(CommandHandler("batch", batch))
+    application.add_handler(CommandHandler("genlink", genlink))
+    application.add_handler(CommandHandler("batchgen", batchgen))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("logs", logs))
+    application.add_handler(CommandHandler("broadcast", broadcast))
+    application.add_handler(CommandHandler("users", users))
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    # Message and callback handlers
+    application.add_handler(MessageHandler(filters.TEXT & (filters.ChatType.GROUPS | filters.ChatType.SUPERGROUP), handle_group_message))
+    application.add_handler(CallbackQueryHandler(handle_link_click, pattern="^download_"))
+    application.add_handler(CallbackQueryHandler(handle_button_click, pattern="^(how_to_download|back_to_download)$"))
+    application.add_handler(CallbackQueryHandler(button_callback))
 
-    # Load or initialize admins 🔑
-    admins = get_admins()
-    app.bot_data["admin_ids"] = admins
+    # Error handler
+    application.add_error_handler(error_handler)
 
-    # Add handlers 📲
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(clone_bot_menu, pattern="^clone_bot_menu$"))
-    app.add_handler(CallbackQueryHandler(create_clone_bot, pattern="^create_clone_bot$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r"^\d+:\d+"), handle_clone_input))
-    app.add_handler(CallbackQueryHandler(handle_visibility_selection, pattern="^(visibility_private|visibility_public|cancel_clone)$"))
-    app.add_handler(CallbackQueryHandler(handle_usage_selection, pattern="^(usage_searchbot|usage_filestorebot)$"))
-    app.add_handler(CallbackQueryHandler(view_clone_bots, pattern="^view_clone_bots$"))
-    app.add_handler(CallbackQueryHandler(delete_clone_bot, pattern="^delete_clone_bot_"))
-    app.add_handler(CallbackQueryHandler(confirm_delete_bot, pattern="^(confirm_delete_bot_|cancel_delete)$"))
-    app.add_handler(CallbackQueryHandler(toggle_force_subscription, pattern="^toggle_force_subscription$"))
-    app.add_handler(CallbackQueryHandler(set_caption, pattern="^set_caption$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_caption_input))
-    app.add_handler(CallbackQueryHandler(broadcast, pattern="^broadcast$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast_input))
-    app.add_handler(CallbackQueryHandler(bot_stats, pattern="^bot_stats$"))
-    app.add_handler(CallbackQueryHandler(settings_menu, pattern="^settings_menu$"))
-    app.add_handler(CallbackQueryHandler(batch_menu, pattern="^batch_menu$"))
-    app.add_handler(CallbackQueryHandler(shortener_menu, pattern="^shortener_menu$"))
-    app.add_handler(CallbackQueryHandler(set_shortener, pattern="^set_shortener_"))
-    app.add_handler(CallbackQueryHandler(tutorial, pattern="^tutorial$"))
-    app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
-    app.add_handler(CallbackQueryHandler(set_delete_timer, pattern="^set_delete_timer$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_delete_timer_input))
-    app.add_handler(CallbackQueryHandler(forcesub_menu, pattern="^forcesub_menu$"))
-    app.add_handler(CallbackQueryHandler(add_forcesub_channel, pattern="^add_forcesub_channel_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_forcesub_input))
-    app.add_handler(CallbackQueryHandler(about_cloned_bot, pattern="^about_cloned_bot$"))
-    app.add_handler(CommandHandler("search", search))
-    app.add_handler(MessageHandler(filters.ChatType.GROUP & ~filters.COMMAND, handle_group_message))
-    app.add_handler(MessageHandler(filters.ChatType.SUPERGROUP & ~filters.COMMAND, handle_group_message))
-    app.add_handler(CallbackQueryHandler(handle_link_click, pattern="^download_"))
-    app.add_handler(CallbackQueryHandler(handle_button_click, pattern="^(download_|how_to_download|back_to_download)"))
-    app.add_handler(CommandHandler("upload", upload))
-    app.add_handler(CommandHandler("get", get_file))
-    app.add_handler(CommandHandler("batch", batch))
-    app.add_handler(CommandHandler("genlink", genlink))
-    app.add_handler(CommandHandler("batchgen", batchgen))
-    app.add_error_handler(error_handler)
-
-    # Start cloned bots 🤖
-    cloned_bots = get_cloned_bots()
-    for bot in cloned_bots:
-        token = bot.get("token")
-        bot_type = bot.get("type", "searchbot")
-        if token:
-            success = start_cloned_bot(token, admins, bot_type)
-            if not success:
-                logger.error(f"🚨 Failed to start cloned bot with token ending {token[-4:]}")
-
-    webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/webhook"
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        url_path="/webhook",
-        webhook_url=webhook_url
-    )
-    logger.info("✅ Bot started successfully 🎉")
+    logger.info("✅ Bot started successfully")
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
