@@ -148,6 +148,21 @@ def schedule_message_deletion(context: CallbackContext, chat_id, message_id, del
             context=(chat_id, message_id)
         )
 
+def parse_file_size(size_str):
+    """Parse file size string (e.g., '2.5 MB') and convert to GB. 📏"""
+    try:
+        size, unit = size_str.split()
+        size = float(size)
+        if unit.lower() == "mb":
+            size = size / 1024  # Convert MB to GB
+        elif unit.lower() == "gb":
+            pass  # Already in GB
+        else:
+            return 0  # Unknown unit
+        return size
+    except (ValueError, IndexError):
+        return 0
+
 def search(update: Update, context: CallbackContext):
     """
     Handle search command or group message to search for files with AI-like logic. 🔍
@@ -265,13 +280,31 @@ def handle_link_click(update: Update, context: CallbackContext):
         log_user_activity(context, user_id, username, f"Tried to Access Expired/Invalid Link (start_id: {start_id})")
         return
 
+    # Parse file size to determine if it's greater than 2 GB 📏
+    file_size_str = query.message.text.split('(')[1].split(')')[0]
+    file_size_gb = parse_file_size(file_size_str)
+    is_large_file = file_size_gb > 2
+
+    # Shorten the cloud link 🔗
     shortened_url = shorten_url(gdtot_link)
-    dm_text = (
-        "✨ **Download Your File!** ✨\n\n"
-        f"📁 **File**: {query.message.text.split('\n\n')[-1].split('(')[0].strip()}\n"
-        f"📏 **Size**: {query.message.text.split('(')[1].split(')')[0]}\n\n"
-        "👇 **Choose an Option Below** 👇"
-    )
+
+    # Prepare DM message based on file size 💬
+    if is_large_file:
+        dm_text = (
+            "✨ **Download Your File!** ✨\n\n"
+            f"📁 **File**: {query.message.text.split('\n\n')[-1].split('(')[0].strip()}\n"
+            f"📏 **Size**: {file_size_str}\n"
+            "⚠️ **Note**: This file is larger than 2 GB. A cloud link has been provided for download. ☁️\n\n"
+            "👇 **Choose an Option Below** 👇"
+        )
+    else:
+        dm_text = (
+            "✨ **Download Your File!** ✨\n\n"
+            f"📁 **File**: {query.message.text.split('\n\n')[-1].split('(')[0].strip()}\n"
+            f"📏 **Size**: {file_size_str}\n\n"
+            "👇 **Choose an Option Below** 👇"
+        )
+
     keyboard = [
         [
             InlineKeyboardButton("📩 Telegram Download", url=shortened_url, callback_data=f"download_{token}"),
@@ -325,7 +358,7 @@ def handle_button_click(update: Update, context: CallbackContext):
     elif data == "how_to_download":
         keyboard = [[InlineKeyboardButton("🔙 Back to Download 🔄", callback_data="back_to_download")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.message.edit_text("📚 Follow this guide to download your file! 📖\n{HOW_TO_DOWNLOAD_LINK}", reply_markup=reply_markup)
+        query.message.edit_text(f"📚 Follow this guide to download your file! 📖\n{HOW_TO_DOWNLOAD_LINK}", reply_markup=reply_markup)
         send_log_to_channel(context, f"User {user_id} viewed How to Download guide. 📚")
         log_user_activity(context, user_id, username, "Viewed How to Download Guide")
     elif data == "back_to_download":
